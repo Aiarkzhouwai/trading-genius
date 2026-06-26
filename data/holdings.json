@@ -1,0 +1,16 @@
+{
+  "holdings": [
+    {
+      "code": "688146",
+      "market": "SH",
+      "shares": 300,
+      "costPrice": 390
+    },
+    {
+      "code": "688530",
+      "market": "SH",
+      "shares": 200,
+      "costPrice": 85
+    }
+  ]
+}

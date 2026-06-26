@@ -4,9 +4,11 @@
 
 ## 当前持仓
 
+默认持仓写在 `data/holdings.json`，线上没有设置 `HOLDINGS_JSON` 时会读取这份配置。
+
 | 股票 | 股数 | 成本价 |
 | --- | ---: | ---: |
-| 688146.SH | 300 | 290 |
+| 688146.SH | 300 | 390 |
 | 688530.SH | 200 | 85 |
 
 ## 本地运行
@@ -32,4 +34,4 @@ npm start
 
 - `REFRESH_SECONDS`: 页面自动刷新秒数，默认 `30`
 - `QUOTE_CACHE_MS`: 服务端行情缓存毫秒数，默认 `15000`
-- `HOLDINGS_JSON`: 覆盖持仓配置，例如 `[{"code":"688146","market":"SH","shares":300,"costPrice":290}]`
+- `HOLDINGS_JSON`: 覆盖默认持仓配置，例如 `[{"code":"688146","market":"SH","shares":300,"costPrice":390}]`

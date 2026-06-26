@@ -47,6 +47,16 @@ function signedCny(value) {
   return `${sign}${formatCny(value)}`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
 function toneClass(value) {
   return value < 0 ? "loss" : "profit";
 }
@@ -83,12 +93,13 @@ function renderHoldings(holdings) {
     card.className = "stock-card";
     const profitClass = toneClass(item.profit);
     const changeClass = toneClass(item.changePercent || 0);
+    const displayCode = item.displayCode || item.windCode || item.code;
 
     card.innerHTML = `
       <div class="stock-head">
         <div class="stock-title">
-          <strong>${item.name}</strong>
-          <span>${item.code} · ${item.shares} 股 · 成本 ${formatPrice(item.costPrice)}</span>
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(displayCode)} · ${item.shares} 股 · 成本 ${formatPrice(item.costPrice)}</span>
         </div>
         <div class="price-box">
           <strong>${formatPrice(item.lastPrice)}</strong>

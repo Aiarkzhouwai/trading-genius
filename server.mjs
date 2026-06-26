@@ -1,10 +1,12 @@
 import http from "node:http";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(__dirname, "public");
+const holdingsFilePath = join(__dirname, "data", "holdings.json");
 const port = Number(process.env.PORT || 3000);
 const refreshSeconds = Number(process.env.REFRESH_SECONDS || 30);
 const quoteCacheMs = Number(process.env.QUOTE_CACHE_MS || 15_000);
@@ -14,7 +16,7 @@ const defaultHoldings = [
     code: "688146",
     market: "SH",
     shares: 300,
-    costPrice: 290
+    costPrice: 390
   },
   {
     code: "688530",
@@ -24,7 +26,7 @@ const defaultHoldings = [
   }
 ];
 
-const holdings = parseHoldings(process.env.HOLDINGS_JSON) ?? defaultHoldings;
+const holdings = loadHoldings();
 let cachedPortfolio = null;
 let cachedAt = 0;
 
@@ -32,7 +34,7 @@ function parseHoldings(value) {
   if (!value) return null;
 
   try {
-    const parsed = JSON.parse(value);
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
 
     return parsed.map((item) => ({
@@ -44,6 +46,21 @@ function parseHoldings(value) {
   } catch {
     return null;
   }
+}
+
+function loadHoldings() {
+  const envHoldings = parseHoldings(process.env.HOLDINGS_JSON);
+  if (envHoldings?.length) return envHoldings;
+
+  try {
+    const fileConfig = JSON.parse(readFileSync(holdingsFilePath, "utf8"));
+    const fileHoldings = parseHoldings(fileConfig.holdings ?? fileConfig);
+    if (fileHoldings?.length) return fileHoldings;
+  } catch {
+    return defaultHoldings;
+  }
+
+  return defaultHoldings;
 }
 
 function inferMarket(code) {
@@ -234,6 +251,7 @@ function enrichHolding(holding, quote) {
   return {
     ...holding,
     name: quote.name,
+    displayCode: `${holding.code}.${holding.market}`,
     windCode: `${holding.code}.${holding.market}`,
     lastPrice: quote.lastPrice,
     previousClose: quote.previousClose,
