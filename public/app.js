@@ -4,7 +4,6 @@ const state = {
   timer: null,
   portfolio: null,
   shareOverrides: new Map(),
-  chartModes: new Map(),
   celebrated: false,
   confettiFrame: null,
   savingSnapshot: false,
@@ -95,13 +94,6 @@ function formatPrice(value) {
   return Number(value).toFixed(2);
 }
 
-function signedPrice(value) {
-  const numeric = Number(value);
-  if (value === null || value === undefined || Number.isNaN(numeric)) return "--";
-  const sign = numeric > 0 ? "+" : "";
-  return `${sign}${formatPrice(numeric)}`;
-}
-
 function signedCny(value, options = {}) {
   const numeric = Number(value);
   if (value === null || value === undefined || Number.isNaN(numeric)) return "--";
@@ -116,16 +108,6 @@ function exactSignedCny(value) {
 function setAmountText(node, text, exactText = text) {
   node.textContent = text;
   node.title = exactText;
-}
-
-function svgEscape(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    "\"": "&quot;",
-    "'": "&#39;"
-  })[char]);
 }
 
 function escapeHtml(value) {
@@ -162,10 +144,6 @@ function formatChinaTime(iso) {
 
 function holdingKey(item) {
   return item.displayCode || item.windCode || `${item.code}.${item.market || ""}`;
-}
-
-function chartModeFor(item) {
-  return state.chartModes.get(item.key) || "intraday";
 }
 
 function parseShares(value) {
@@ -266,184 +244,6 @@ function renderBars(holdings, total) {
   });
 }
 
-function formatMinuteTime(value) {
-  const text = String(value || "");
-  if (text.length !== 4) return text;
-  return `${text.slice(0, 2)}:${text.slice(2)}`;
-}
-
-function renderQuoteSummary(item) {
-  const changeClass = toneClass(Number(item.change || item.changePercent || 0));
-  return `
-    <div class="chart-heading">
-      <span>当前行情</span>
-      <strong class="${changeClass}">${formatPrice(item.lastPrice)} · ${signedPrice(item.change)} · ${formatPercent(item.changePercent)}</strong>
-    </div>
-  `;
-}
-
-function renderChartSwitcher(item, mode) {
-  const modes = [
-    { value: "intraday", label: "分时" },
-    { value: "daily", label: "日K" }
-  ];
-  return `
-    <div class="chart-switcher" role="tablist" aria-label="${escapeHtml(item.name)}图表切换">
-      ${modes.map((entry) => `
-        <button
-          class="chart-mode-button ${mode === entry.value ? "is-active" : ""}"
-          type="button"
-          role="tab"
-          aria-selected="${mode === entry.value ? "true" : "false"}"
-          data-key="${escapeHtml(item.key)}"
-          data-mode="${entry.value}"
-        >${entry.label}</button>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderIntradayChart(item) {
-  const minutes = Array.isArray(item.intradayMinutes) ? item.intradayMinutes.filter((row) => (
-    row.time && Number.isFinite(Number(row.price))
-  )) : [];
-
-  if (minutes.length < 2) {
-    return `
-      <div class="chart-empty">行情源暂时没有返回分时数据</div>
-    `;
-  }
-
-  const width = 320;
-  const height = 126;
-  const top = 12;
-  const bottom = 24;
-  const left = 8;
-  const right = 8;
-  const chartWidth = width - left - right;
-  const chartHeight = height - top - bottom;
-  const prices = minutes.map((row) => Number(row.price));
-  const previousClose = finiteNumber(item.previousClose);
-  const min = Math.min(...prices, previousClose ?? Infinity);
-  const max = Math.max(...prices, previousClose ?? -Infinity);
-  const range = max - min || 1;
-  const priceY = (price) => top + ((max - price) / range) * chartHeight;
-  const step = chartWidth / Math.max(1, minutes.length - 1);
-  const linePoints = minutes.map((row, index) => {
-    const x = left + index * step;
-    const y = priceY(Number(row.price));
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(" ");
-  const last = minutes.at(-1);
-  const first = minutes[0];
-  const trendBase = previousClose ?? Number(first.price);
-  const trendClass = Number(last.price) < trendBase ? "loss" : "profit";
-  const grid = [0.25, 0.5, 0.75].map((ratio) => {
-    const y = top + chartHeight * ratio;
-    return `<line x1="${left}" y1="${y.toFixed(2)}" x2="${width - right}" y2="${y.toFixed(2)}" class="chart-grid-line" />`;
-  }).join("");
-  const baseline = previousClose !== null && previousClose >= min && previousClose <= max
-    ? `<line x1="${left}" y1="${priceY(previousClose).toFixed(2)}" x2="${width - right}" y2="${priceY(previousClose).toFixed(2)}" class="minute-baseline" />`
-    : "";
-
-  return `
-    <svg class="chart-svg minute-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${svgEscape(item.name)}当日分时图">
-      <rect x="0" y="0" width="${width}" height="${height}" class="chart-bg" />
-      ${grid}
-      ${baseline}
-      <polyline class="minute-line ${trendClass}" points="${linePoints}" />
-      <circle class="minute-last ${trendClass}" cx="${(left + (minutes.length - 1) * step).toFixed(2)}" cy="${priceY(Number(last.price)).toFixed(2)}" r="2.8" />
-      <text x="${left}" y="${height - 9}" class="chart-axis">${svgEscape(formatMinuteTime(first.time))}</text>
-      <text x="${width - right}" y="${height - 9}" class="chart-axis end">${svgEscape(formatMinuteTime(last.time))}</text>
-      <text x="${width - right}" y="${top + 2}" class="chart-price end">高 ${formatPrice(max)}</text>
-      <text x="${width - right}" y="${top + chartHeight - 13}" class="chart-price end">低 ${formatPrice(min)}</text>
-    </svg>
-  `;
-}
-
-function renderDailyKlineChart(item) {
-  const candles = Array.isArray(item.dailyKline) ? item.dailyKline.filter((row) => (
-    Number.isFinite(Number(row.open))
-    && Number.isFinite(Number(row.close))
-    && Number.isFinite(Number(row.high))
-    && Number.isFinite(Number(row.low))
-  )) : [];
-
-  if (candles.length < 2) {
-    return `
-      <div class="chart-empty">行情源暂时没有返回日K数据</div>
-    `;
-  }
-
-  const width = 320;
-  const height = 126;
-  const top = 12;
-  const bottom = 24;
-  const left = 8;
-  const right = 8;
-  const chartWidth = width - left - right;
-  const chartHeight = height - top - bottom;
-  const lows = candles.map((row) => Number(row.low));
-  const highs = candles.map((row) => Number(row.high));
-  const min = Math.min(...lows);
-  const max = Math.max(...highs);
-  const range = max - min || 1;
-  const step = chartWidth / Math.max(1, candles.length - 1);
-  const bodyWidth = Math.max(2.4, Math.min(7, step * 0.56));
-  const priceY = (price) => top + ((max - price) / range) * chartHeight;
-  const grid = [0.25, 0.5, 0.75].map((ratio) => {
-    const y = top + chartHeight * ratio;
-    return `<line x1="${left}" y1="${y.toFixed(2)}" x2="${width - right}" y2="${y.toFixed(2)}" class="chart-grid-line" />`;
-  }).join("");
-
-  const candleNodes = candles.map((row, index) => {
-    const open = Number(row.open);
-    const close = Number(row.close);
-    const high = Number(row.high);
-    const low = Number(row.low);
-    const x = left + index * step;
-    const highY = priceY(high);
-    const lowY = priceY(low);
-    const openY = priceY(open);
-    const closeY = priceY(close);
-    const bodyY = Math.min(openY, closeY);
-    const bodyHeight = Math.max(1.6, Math.abs(openY - closeY));
-    const tone = close >= open ? "up" : "down";
-    return `
-      <g class="kline-candle ${tone}">
-        <line x1="${x.toFixed(2)}" y1="${highY.toFixed(2)}" x2="${x.toFixed(2)}" y2="${lowY.toFixed(2)}" />
-        <rect x="${(x - bodyWidth / 2).toFixed(2)}" y="${bodyY.toFixed(2)}" width="${bodyWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="0.8" />
-      </g>
-    `;
-  }).join("");
-
-  const firstDate = candles[0].date?.slice(5) || "";
-  const lastDate = candles.at(-1).date?.slice(5) || "";
-
-  return `
-      <svg class="chart-svg kline-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${svgEscape(item.name)}近${candles.length}日K线">
-        <rect x="0" y="0" width="${width}" height="${height}" class="chart-bg" />
-        ${grid}
-        ${candleNodes}
-        <text x="${left}" y="${height - 9}" class="chart-axis">${svgEscape(firstDate)}</text>
-        <text x="${width - right}" y="${height - 9}" class="chart-axis end">${svgEscape(lastDate)}</text>
-        <text x="${width - right}" y="${top + 2}" class="chart-price end">高 ${formatPrice(max)}</text>
-        <text x="${width - right}" y="${top + chartHeight - 13}" class="chart-price end">低 ${formatPrice(min)}</text>
-      </svg>
-  `;
-}
-
-function renderChartPanel(item) {
-  const mode = chartModeFor(item);
-  return `
-    <div class="chart-panel" data-chart-panel>
-      ${renderQuoteSummary(item)}
-      ${renderChartSwitcher(item, mode)}
-      ${mode === "intraday" ? renderIntradayChart(item) : renderDailyKlineChart(item)}
-    </div>
-  `;
-}
-
 function renderSummary(data) {
   const summary = data.summary;
   const profitClass = toneClass(summary.profit);
@@ -509,7 +309,6 @@ function renderHoldings(holdings) {
           <span class="chip ${changeClass}">${formatPercent(item.changePercent)}</span>
         </div>
       </div>
-      ${renderChartPanel(item)}
       <label class="shares-row">
         <span>股数</span>
         <input
@@ -793,185 +592,10 @@ function drawText(ctx, text, x, y, font, color, align = "left", maxWidth = null)
   ctx.fillText(clipCanvasText(ctx, text, maxWidth), x, y);
 }
 
-function drawKlineCanvas(ctx, candles, x, y, width, height) {
-  const rows = Array.isArray(candles) ? candles.filter((row) => (
-    Number.isFinite(Number(row.open))
-    && Number.isFinite(Number(row.close))
-    && Number.isFinite(Number(row.high))
-    && Number.isFinite(Number(row.low))
-  )) : [];
-
-  ctx.save();
-  ctx.fillStyle = "#fafbfc";
-  roundRect(ctx, x, y, width, height, 8);
-  ctx.fill();
-
-  if (rows.length < 2) {
-    drawText(ctx, "K线暂不可用", x + width / 2, y + height / 2 - 16, "600 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "center", width - 40);
-    ctx.restore();
-    return;
-  }
-
-  const paddingTop = 18;
-  const paddingBottom = 28;
-  const paddingX = 12;
-  const chartWidth = width - paddingX * 2;
-  const chartHeight = height - paddingTop - paddingBottom;
-  const lows = rows.map((row) => Number(row.low));
-  const highs = rows.map((row) => Number(row.high));
-  const min = Math.min(...lows);
-  const max = Math.max(...highs);
-  const range = max - min || 1;
-  const yFor = (price) => y + paddingTop + ((max - price) / range) * chartHeight;
-  const step = chartWidth / Math.max(1, rows.length - 1);
-  const bodyWidth = Math.max(4, Math.min(12, step * 0.55));
-
-  ctx.strokeStyle = "#e9ecf1";
-  ctx.lineWidth = 1;
-  [0.25, 0.5, 0.75].forEach((ratio) => {
-    const gridY = y + paddingTop + chartHeight * ratio;
-    ctx.beginPath();
-    ctx.moveTo(x + paddingX, gridY);
-    ctx.lineTo(x + width - paddingX, gridY);
-    ctx.stroke();
-  });
-
-  rows.forEach((row, index) => {
-    const open = Number(row.open);
-    const close = Number(row.close);
-    const high = Number(row.high);
-    const low = Number(row.low);
-    const candleX = x + paddingX + index * step;
-    const highY = yFor(high);
-    const lowY = yFor(low);
-    const openY = yFor(open);
-    const closeY = yFor(close);
-    const color = close >= open ? "#d62027" : "#16875a";
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(candleX, highY);
-    ctx.lineTo(candleX, lowY);
-    ctx.stroke();
-    ctx.fillRect(candleX - bodyWidth / 2, Math.min(openY, closeY), bodyWidth, Math.max(2, Math.abs(openY - closeY)));
-  });
-
-  drawText(ctx, rows[0].date?.slice(5) || "", x + paddingX, y + height - 24, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-  drawText(ctx, rows.at(-1).date?.slice(5) || "", x + width - paddingX, y + height - 24, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
-  drawText(ctx, `高 ${formatPrice(max)}`, x + width - paddingX, y + 10, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
-  drawText(ctx, `低 ${formatPrice(min)}`, x + width - paddingX, y + height - 50, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
-  ctx.restore();
-}
-
-function drawIntradayCanvas(ctx, minutes, previousClose, x, y, width, height) {
-  const rows = Array.isArray(minutes) ? minutes.filter((row) => (
-    row.time && Number.isFinite(Number(row.price))
-  )) : [];
-
-  ctx.save();
-  ctx.fillStyle = "#fafbfc";
-  roundRect(ctx, x, y, width, height, 8);
-  ctx.fill();
-
-  if (rows.length < 2) {
-    drawText(ctx, "分时暂不可用", x + width / 2, y + height / 2 - 16, "600 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "center", width - 40);
-    ctx.restore();
-    return;
-  }
-
-  const paddingTop = 18;
-  const paddingBottom = 28;
-  const paddingX = 12;
-  const chartWidth = width - paddingX * 2;
-  const chartHeight = height - paddingTop - paddingBottom;
-  const prices = rows.map((row) => Number(row.price));
-  const baseline = finiteNumber(previousClose);
-  const min = Math.min(...prices, baseline ?? Infinity);
-  const max = Math.max(...prices, baseline ?? -Infinity);
-  const range = max - min || 1;
-  const yFor = (price) => y + paddingTop + ((max - price) / range) * chartHeight;
-  const step = chartWidth / Math.max(1, rows.length - 1);
-  const last = rows.at(-1);
-  const trendBase = baseline ?? Number(rows[0].price);
-  const color = Number(last.price) < trendBase ? "#16875a" : "#d62027";
-
-  ctx.strokeStyle = "#e9ecf1";
-  ctx.lineWidth = 1;
-  [0.25, 0.5, 0.75].forEach((ratio) => {
-    const gridY = y + paddingTop + chartHeight * ratio;
-    ctx.beginPath();
-    ctx.moveTo(x + paddingX, gridY);
-    ctx.lineTo(x + width - paddingX, gridY);
-    ctx.stroke();
-  });
-
-  if (baseline !== null && baseline >= min && baseline <= max) {
-    ctx.strokeStyle = "#b9c0ca";
-    ctx.setLineDash([6, 6]);
-    ctx.beginPath();
-    ctx.moveTo(x + paddingX, yFor(baseline));
-    ctx.lineTo(x + width - paddingX, yFor(baseline));
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  rows.forEach((row, index) => {
-    const pointX = x + paddingX + index * step;
-    const pointY = yFor(Number(row.price));
-    if (index === 0) {
-      ctx.moveTo(pointX, pointY);
-    } else {
-      ctx.lineTo(pointX, pointY);
-    }
-  });
-  ctx.stroke();
-
-  const lastX = x + paddingX + (rows.length - 1) * step;
-  const lastY = yFor(Number(last.price));
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-  ctx.fill();
-
-  drawText(ctx, formatMinuteTime(rows[0].time), x + paddingX, y + height - 24, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-  drawText(ctx, formatMinuteTime(last.time), x + width - paddingX, y + height - 24, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
-  drawText(ctx, `高 ${formatPrice(max)}`, x + width - paddingX, y + 10, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
-  drawText(ctx, `低 ${formatPrice(min)}`, x + width - paddingX, y + height - 50, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
-  ctx.restore();
-}
-
-function drawChartSwitcherCanvas(ctx, mode, x, y, width, height) {
-  ctx.save();
-  ctx.fillStyle = "#f3f5f8";
-  roundRect(ctx, x, y, width, height, 8);
-  ctx.fill();
-
-  const buttonWidth = (width - 4) / 2;
-  [
-    { value: "intraday", label: "分时" },
-    { value: "daily", label: "日K" }
-  ].forEach((entry, index) => {
-    const buttonX = x + 2 + index * buttonWidth;
-    if (mode === entry.value) {
-      ctx.fillStyle = "#ffffff";
-      roundRect(ctx, buttonX, y + 2, buttonWidth, height - 4, 6);
-      ctx.fill();
-    }
-    drawText(ctx, entry.label, buttonX + buttonWidth / 2, y + 7, "800 22px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", mode === entry.value ? "#15171a" : "#69707a", "center", buttonWidth - 12);
-  });
-  ctx.restore();
-}
-
 function captureCanvasFallback() {
   const data = computedPortfolio();
   const width = 1080;
-  const height = 500 + data.holdings.length * 420;
+  const height = 500 + data.holdings.length * 250;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -995,28 +619,18 @@ function captureCanvasFallback() {
 
   let y = 464;
   data.holdings.forEach((item) => {
-    const chartMode = chartModeFor(item);
-    const quoteColor = item.change < 0 ? "#16875a" : "#d62027";
-    drawCard(ctx, 54, y, 972, 380);
+    drawCard(ctx, 54, y, 972, 210);
     drawText(ctx, item.name, 94, y + 34, "800 42px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 560);
     drawText(ctx, `${item.displayCode || item.windCode || item.code} · ${formatShares(item.shares)} 股 · 成本 ${formatPrice(item.costPrice)}`, 94, y + 88, "500 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "left", 620);
     drawText(ctx, formatPrice(item.lastPrice), 986, y + 34, "850 46px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "right", 260);
     drawText(ctx, formatPercent(item.changePercent), 986, y + 92, "800 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.changePercent < 0 ? "#16875a" : "#d62027", "right", 220);
-    drawText(ctx, "当前行情", 94, y + 124, "600 22px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, `${formatPrice(item.lastPrice)} · ${signedPrice(item.change)} · ${formatPercent(item.changePercent)}`, 986, y + 124, "800 22px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", quoteColor, "right", 500);
-    drawChartSwitcherCanvas(ctx, chartMode, 94, y + 154, 260, 38);
-    if (chartMode === "daily") {
-      drawKlineCanvas(ctx, item.dailyKline, 94, y + 206, 892, 116);
-    } else {
-      drawIntradayCanvas(ctx, item.intradayMinutes, item.previousClose, 94, y + 206, 892, 116);
-    }
-    drawText(ctx, "累计收益", 94, y + 336, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, signedCny(item.profit), 94, y + 364, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profit < 0 ? "#16875a" : "#d62027", "left", 240);
-    drawText(ctx, "收益率", 394, y + 336, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, formatPercent(item.profitRate), 394, y + 364, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profitRate < 0 ? "#16875a" : "#d62027", "left", 210);
-    drawText(ctx, "市值", 694, y + 336, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, formatCny(item.marketValue), 694, y + 364, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 270);
-    y += 420;
+    drawText(ctx, "累计收益", 94, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+    drawText(ctx, signedCny(item.profit), 94, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profit < 0 ? "#16875a" : "#d62027", "left", 240);
+    drawText(ctx, "收益率", 394, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+    drawText(ctx, formatPercent(item.profitRate), 394, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profitRate < 0 ? "#16875a" : "#d62027", "left", 210);
+    drawText(ctx, "市值", 694, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+    drawText(ctx, formatCny(item.marketValue), 694, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 270);
+    y += 250;
   });
 
   return canvas;
@@ -1100,13 +714,6 @@ el.holdings.addEventListener("input", (event) => {
   if (!input) return;
   state.shareOverrides.set(input.dataset.key, parseShares(input.value));
   renderCurrentView();
-});
-
-el.holdings.addEventListener("click", (event) => {
-  const button = event.target.closest(".chart-mode-button");
-  if (!button) return;
-  state.chartModes.set(button.dataset.key, button.dataset.mode);
-  renderCurrentView({ rebuildHoldings: true });
 });
 
 el.refreshButton.addEventListener("click", () => {
