@@ -5,19 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f8f9fb">
     <title>交易天才</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/styles.css?v=20260626-2">
   </head>
   <body>
     <main class="shell" aria-live="polite">
       <header class="topbar">
         <div>
-          <p class="eyebrow">给爸爸看的持仓收益</p>
           <h1>交易天才</h1>
         </div>
-        <button class="icon-button" id="refreshButton" type="button" title="刷新行情">
-          <span aria-hidden="true">↻</span>
-          <span class="sr-only">刷新行情</span>
-        </button>
+        <div class="actions">
+          <button class="icon-button" id="saveButton" type="button" title="保存截图" onclick="window.dispatchEvent(new CustomEvent('save-trading-genius-snapshot'))">
+            <span aria-hidden="true">⇩</span>
+            <span class="sr-only">保存截图</span>
+          </button>
+          <button class="icon-button" id="refreshButton" type="button" title="刷新行情">
+            <span aria-hidden="true">↻</span>
+            <span class="sr-only">刷新行情</span>
+          </button>
+        </div>
       </header>
 
       <section class="hero-card">
@@ -63,6 +68,20 @@
       <p class="risk-note">行情可能存在延迟；收益仅按页面显示价格估算，最终以券商成交和持仓为准。</p>
     </main>
 
-    <script type="module" src="/app.js"></script>
+    <div class="celebration" id="celebration" hidden>
+      <canvas class="confetti-canvas" id="confettiCanvas" aria-hidden="true"></canvas>
+      <div class="celebration-card" role="dialog" aria-modal="true" aria-labelledby="celebrationTitle">
+        <button class="celebration-close" id="celebrationClose" type="button" title="关闭">
+          <span aria-hidden="true">×</span>
+          <span class="sr-only">关闭</span>
+        </button>
+        <span class="celebration-kicker">今日盈利</span>
+        <h2 id="celebrationTitle">恭喜交易天才发财了！</h2>
+        <p id="celebrationAmount">--</p>
+      </div>
+    </div>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script type="module" src="/app.js?v=20260626-12"></script>
   </body>
 </html>
