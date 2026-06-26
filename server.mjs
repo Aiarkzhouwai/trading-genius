@@ -10,6 +10,7 @@ const holdingsFilePath = join(__dirname, "data", "holdings.json");
 const port = Number(process.env.PORT || 3000);
 const refreshSeconds = Number(process.env.REFRESH_SECONDS || 30);
 const quoteCacheMs = Number(process.env.QUOTE_CACHE_MS || 15_000);
+const klineLimit = Number(process.env.KLINE_LIMIT || 40);
 
 const defaultHoldings = [
   {
@@ -189,6 +190,11 @@ function tencentSymbolFor(holding) {
   return `${prefix}${holding.code}`;
 }
 
+function numberOrNull(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function parseTencentTime(value) {
   if (!value || value.length < 14) return null;
   const year = value.slice(0, 4);
@@ -243,6 +249,60 @@ async function fetchTencentQuote(holding) {
   };
 }
 
+async function fetchTencentDailyKline(holding) {
+  const symbol = tencentSymbolFor(holding);
+  const limit = Math.max(10, Math.min(90, Number(klineLimit) || 40));
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${symbol},day,,,${limit},qfq`;
+  const response = await fetchWithRetry(url, {
+    attempts: 1,
+    timeoutMs: 5000,
+    headers: {
+      "accept": "application/json,text/plain,*/*",
+      "user-agent": "trading-genius/0.1"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Tencent kline request failed with ${response.status}`);
+  }
+
+  const body = await response.json();
+  const node = body.data?.[symbol];
+  const rows = node?.qfqday || node?.day || [];
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error("Tencent kline response did not include daily data");
+  }
+
+  const items = rows.map((row) => ({
+    date: row[0],
+    open: numberOrNull(row[1]),
+    close: numberOrNull(row[2]),
+    high: numberOrNull(row[3]),
+    low: numberOrNull(row[4]),
+    volume: numberOrNull(row[5])
+  })).filter((item) => item.date && item.open !== null && item.close !== null && item.high !== null && item.low !== null);
+
+  if (!items.length) {
+    throw new Error("Tencent kline response did not include valid daily data");
+  }
+
+  return {
+    source: "腾讯日K",
+    items: items.slice(-limit)
+  };
+}
+
+async function fetchDailyKline(holding) {
+  try {
+    return await fetchTencentDailyKline(holding);
+  } catch (error) {
+    return {
+      source: null,
+      items: [],
+      error: error.message
+    };
+  }
+}
+
 async function fetchQuote(holding) {
   try {
     return await fetchEastmoneyQuote(holding);
@@ -278,7 +338,7 @@ function resolveDayBaseline(holding, quote) {
     : "previousClose";
 }
 
-function enrichHolding(holding, quote) {
+function enrichHolding(holding, quote, dailyKline = { items: [] }) {
   const costAmount = holding.shares * holding.costPrice;
   const marketValue = holding.shares * quote.lastPrice;
   const profit = marketValue - costAmount;
@@ -309,7 +369,10 @@ function enrichHolding(holding, quote) {
     dayBaseline,
     dayBaselinePrice,
     dayChange,
-    dayProfit
+    dayProfit,
+    dailyKline: dailyKline.items,
+    klineSource: dailyKline.source,
+    klineError: dailyKline.error
   };
 }
 
@@ -343,8 +406,11 @@ async function buildPortfolio() {
       ...holding,
       market: holding.market || inferMarket(holding.code)
     };
-    const quote = await fetchQuote(normalized);
-    return enrichHolding(normalized, quote);
+    const [quote, dailyKline] = await Promise.all([
+      fetchQuote(normalized),
+      fetchDailyKline(normalized)
+    ]);
+    return enrichHolding(normalized, quote, dailyKline);
   }));
 
   const items = [];

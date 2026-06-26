@@ -277,6 +277,93 @@ button:disabled {
   font-size: 22px;
 }
 
+.kline-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.kline-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.kline-heading span {
+  color: var(--muted);
+}
+
+.kline-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.kline-chart {
+  display: block;
+  width: 100%;
+  height: 126px;
+  margin-top: 8px;
+  overflow: visible;
+}
+
+.kline-bg {
+  fill: #fafbfc;
+}
+
+.kline-grid-line {
+  stroke: #e9ecf1;
+  stroke-width: 1;
+}
+
+.kline-candle line {
+  stroke-width: 1.3;
+}
+
+.kline-candle rect {
+  stroke-width: 1;
+}
+
+.kline-candle.up line,
+.kline-candle.up rect {
+  fill: var(--profit);
+  stroke: var(--profit);
+}
+
+.kline-candle.down line,
+.kline-candle.down rect {
+  fill: var(--loss);
+  stroke: var(--loss);
+}
+
+.kline-axis,
+.kline-price {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.kline-axis.end,
+.kline-price.end {
+  text-anchor: end;
+}
+
+.kline-empty {
+  display: grid;
+  place-items: center;
+  height: 88px;
+  margin-top: 8px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  background: #fafbfc;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

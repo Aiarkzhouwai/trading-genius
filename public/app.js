@@ -110,6 +110,16 @@ function setAmountText(node, text, exactText = text) {
   node.title = exactText;
 }
 
+function svgEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -244,6 +254,97 @@ function renderBars(holdings, total) {
   });
 }
 
+function renderKlineChart(item) {
+  const candles = Array.isArray(item.dailyKline) ? item.dailyKline.filter((row) => (
+    Number.isFinite(Number(row.open))
+    && Number.isFinite(Number(row.close))
+    && Number.isFinite(Number(row.high))
+    && Number.isFinite(Number(row.low))
+  )) : [];
+
+  if (candles.length < 2) {
+    return `
+      <div class="kline-panel is-empty">
+        <div class="kline-heading">
+          <span>近40日K线</span>
+          <strong>K线暂不可用</strong>
+        </div>
+        <div class="kline-empty">行情源暂时没有返回日K数据</div>
+      </div>
+    `;
+  }
+
+  const width = 320;
+  const height = 126;
+  const top = 12;
+  const bottom = 24;
+  const left = 8;
+  const right = 8;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const lows = candles.map((row) => Number(row.low));
+  const highs = candles.map((row) => Number(row.high));
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const range = max - min || 1;
+  const step = chartWidth / Math.max(1, candles.length - 1);
+  const bodyWidth = Math.max(2.4, Math.min(7, step * 0.56));
+  const priceY = (price) => top + ((max - price) / range) * chartHeight;
+  const grid = [0.25, 0.5, 0.75].map((ratio) => {
+    const y = top + chartHeight * ratio;
+    return `<line x1="${left}" y1="${y.toFixed(2)}" x2="${width - right}" y2="${y.toFixed(2)}" class="kline-grid-line" />`;
+  }).join("");
+
+  const candleNodes = candles.map((row, index) => {
+    const open = Number(row.open);
+    const close = Number(row.close);
+    const high = Number(row.high);
+    const low = Number(row.low);
+    const x = left + index * step;
+    const highY = priceY(high);
+    const lowY = priceY(low);
+    const openY = priceY(open);
+    const closeY = priceY(close);
+    const bodyY = Math.min(openY, closeY);
+    const bodyHeight = Math.max(1.6, Math.abs(openY - closeY));
+    const tone = close >= open ? "up" : "down";
+    return `
+      <g class="kline-candle ${tone}">
+        <line x1="${x.toFixed(2)}" y1="${highY.toFixed(2)}" x2="${x.toFixed(2)}" y2="${lowY.toFixed(2)}" />
+        <rect x="${(x - bodyWidth / 2).toFixed(2)}" y="${bodyY.toFixed(2)}" width="${bodyWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="0.8" />
+      </g>
+    `;
+  }).join("");
+
+  const last = candles.at(-1);
+  const firstDate = candles[0].date?.slice(5) || "";
+  const lastDate = last.date?.slice(5) || "";
+  const lastClose = Number(last.close);
+  const previousClose = Number(candles.at(-2)?.close);
+  const trend = Number.isFinite(previousClose) && previousClose !== 0
+    ? ((lastClose - previousClose) / previousClose) * 100
+    : null;
+  const trendClass = trend !== null && trend < 0 ? "loss" : "profit";
+
+  return `
+    <div class="kline-panel">
+      <div class="kline-heading">
+        <span>近${candles.length}日K线</span>
+        <strong class="${trendClass}">${formatPrice(lastClose)}${trend === null ? "" : ` · ${formatPercent(trend)}`}</strong>
+      </div>
+      <svg class="kline-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${svgEscape(item.name)}近${candles.length}日K线">
+        <rect x="0" y="0" width="${width}" height="${height}" class="kline-bg" />
+        ${grid}
+        ${candleNodes}
+        <text x="${left}" y="${height - 9}" class="kline-axis">${svgEscape(firstDate)}</text>
+        <text x="${width - right}" y="${height - 9}" class="kline-axis end">${svgEscape(lastDate)}</text>
+        <text x="${width - right}" y="${top + 2}" class="kline-price end">高 ${formatPrice(max)}</text>
+        <text x="${width - right}" y="${top + chartHeight - 13}" class="kline-price end">低 ${formatPrice(min)}</text>
+      </svg>
+    </div>
+  `;
+}
+
 function renderSummary(data) {
   const summary = data.summary;
   const profitClass = toneClass(summary.profit);
@@ -309,6 +410,7 @@ function renderHoldings(holdings) {
           <span class="chip ${changeClass}">${formatPercent(item.changePercent)}</span>
         </div>
       </div>
+      ${renderKlineChart(item)}
       <label class="shares-row">
         <span>股数</span>
         <input
@@ -592,10 +694,81 @@ function drawText(ctx, text, x, y, font, color, align = "left", maxWidth = null)
   ctx.fillText(clipCanvasText(ctx, text, maxWidth), x, y);
 }
 
+function drawKlineCanvas(ctx, candles, x, y, width, height) {
+  const rows = Array.isArray(candles) ? candles.filter((row) => (
+    Number.isFinite(Number(row.open))
+    && Number.isFinite(Number(row.close))
+    && Number.isFinite(Number(row.high))
+    && Number.isFinite(Number(row.low))
+  )) : [];
+
+  ctx.save();
+  ctx.fillStyle = "#fafbfc";
+  roundRect(ctx, x, y, width, height, 8);
+  ctx.fill();
+
+  if (rows.length < 2) {
+    drawText(ctx, "K线暂不可用", x + width / 2, y + height / 2 - 16, "600 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "center", width - 40);
+    ctx.restore();
+    return;
+  }
+
+  const paddingTop = 18;
+  const paddingBottom = 28;
+  const paddingX = 12;
+  const chartWidth = width - paddingX * 2;
+  const chartHeight = height - paddingTop - paddingBottom;
+  const lows = rows.map((row) => Number(row.low));
+  const highs = rows.map((row) => Number(row.high));
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const range = max - min || 1;
+  const yFor = (price) => y + paddingTop + ((max - price) / range) * chartHeight;
+  const step = chartWidth / Math.max(1, rows.length - 1);
+  const bodyWidth = Math.max(4, Math.min(12, step * 0.55));
+
+  ctx.strokeStyle = "#e9ecf1";
+  ctx.lineWidth = 1;
+  [0.25, 0.5, 0.75].forEach((ratio) => {
+    const gridY = y + paddingTop + chartHeight * ratio;
+    ctx.beginPath();
+    ctx.moveTo(x + paddingX, gridY);
+    ctx.lineTo(x + width - paddingX, gridY);
+    ctx.stroke();
+  });
+
+  rows.forEach((row, index) => {
+    const open = Number(row.open);
+    const close = Number(row.close);
+    const high = Number(row.high);
+    const low = Number(row.low);
+    const candleX = x + paddingX + index * step;
+    const highY = yFor(high);
+    const lowY = yFor(low);
+    const openY = yFor(open);
+    const closeY = yFor(close);
+    const color = close >= open ? "#d62027" : "#16875a";
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(candleX, highY);
+    ctx.lineTo(candleX, lowY);
+    ctx.stroke();
+    ctx.fillRect(candleX - bodyWidth / 2, Math.min(openY, closeY), bodyWidth, Math.max(2, Math.abs(openY - closeY)));
+  });
+
+  drawText(ctx, rows[0].date?.slice(5) || "", x + paddingX, y + height - 24, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+  drawText(ctx, rows.at(-1).date?.slice(5) || "", x + width - paddingX, y + height - 24, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
+  drawText(ctx, `高 ${formatPrice(max)}`, x + width - paddingX, y + 10, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
+  drawText(ctx, `低 ${formatPrice(min)}`, x + width - paddingX, y + height - 50, "600 20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "right");
+  ctx.restore();
+}
+
 function captureCanvasFallback() {
   const data = computedPortfolio();
   const width = 1080;
-  const height = 500 + data.holdings.length * 250;
+  const height = 500 + data.holdings.length * 370;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -619,18 +792,20 @@ function captureCanvasFallback() {
 
   let y = 464;
   data.holdings.forEach((item) => {
-    drawCard(ctx, 54, y, 972, 210);
+    drawCard(ctx, 54, y, 972, 330);
     drawText(ctx, item.name, 94, y + 34, "800 42px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 560);
     drawText(ctx, `${item.displayCode || item.windCode || item.code} · ${formatShares(item.shares)} 股 · 成本 ${formatPrice(item.costPrice)}`, 94, y + 88, "500 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "left", 620);
     drawText(ctx, formatPrice(item.lastPrice), 986, y + 34, "850 46px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "right", 260);
     drawText(ctx, formatPercent(item.changePercent), 986, y + 92, "800 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.changePercent < 0 ? "#16875a" : "#d62027", "right", 220);
-    drawText(ctx, "累计收益", 94, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, signedCny(item.profit), 94, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profit < 0 ? "#16875a" : "#d62027", "left", 240);
-    drawText(ctx, "收益率", 394, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, formatPercent(item.profitRate), 394, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profitRate < 0 ? "#16875a" : "#d62027", "left", 210);
-    drawText(ctx, "市值", 694, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, formatCny(item.marketValue), 694, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 270);
-    y += 250;
+    drawText(ctx, "近40日K线", 94, y + 124, "600 22px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+    drawKlineCanvas(ctx, item.dailyKline, 94, y + 154, 892, 116);
+    drawText(ctx, "累计收益", 94, y + 282, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+    drawText(ctx, signedCny(item.profit), 94, y + 310, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profit < 0 ? "#16875a" : "#d62027", "left", 240);
+    drawText(ctx, "收益率", 394, y + 282, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+    drawText(ctx, formatPercent(item.profitRate), 394, y + 310, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profitRate < 0 ? "#16875a" : "#d62027", "left", 210);
+    drawText(ctx, "市值", 694, y + 282, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+    drawText(ctx, formatCny(item.marketValue), 694, y + 310, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 270);
+    y += 370;
   });
 
   return canvas;
