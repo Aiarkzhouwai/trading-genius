@@ -43,44 +43,31 @@ button:disabled {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 4px 0 18px;
-}
-
-h1 {
-  margin: 0;
-  font-size: 30px;
-  line-height: 1.08;
-  font-weight: 800;
+  justify-content: stretch;
+  padding: 4px 0 12px;
 }
 
 .actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
+  width: 100%;
   gap: 8px;
-  flex: 0 0 auto;
 }
 
-.icon-button {
-  display: grid;
-  place-items: center;
-  width: 44px;
+.text-button {
   height: 44px;
-  flex: 0 0 44px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
   color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
   box-shadow: 0 4px 14px rgba(21, 23, 26, 0.06);
+  white-space: nowrap;
 }
 
-.icon-button span[aria-hidden="true"] {
-  font-size: 22px;
-  line-height: 1;
-}
-
-.icon-button:active {
+.text-button:active {
   transform: translateY(1px);
 }
 
@@ -111,6 +98,10 @@ h1 {
   font-size: 42px;
   line-height: 1;
   font-weight: 850;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hero-value.loss {
@@ -127,6 +118,13 @@ h1 {
   font-size: 14px;
 }
 
+.hero-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -135,6 +133,7 @@ h1 {
 }
 
 .metric-card {
+  min-width: 0;
   padding: 14px;
 }
 
@@ -150,6 +149,10 @@ h1 {
   margin-top: 6px;
   font-size: 18px;
   line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .visual-panel {
@@ -201,7 +204,6 @@ h1 {
 }
 
 .stock-head,
-.stock-grid,
 .status-panel {
   display: flex;
   align-items: center;
@@ -211,6 +213,7 @@ h1 {
 
 .stock-title {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .stock-title strong {
@@ -220,8 +223,12 @@ h1 {
 }
 
 .stock-title span {
+  display: block;
   color: var(--muted);
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shares-row {
@@ -242,8 +249,9 @@ h1 {
 }
 
 .shares-input {
-  width: 112px;
+  width: min(190px, 58%);
   height: 34px;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
@@ -260,6 +268,7 @@ h1 {
 }
 
 .price-box {
+  min-width: 76px;
   text-align: right;
 }
 
@@ -289,12 +298,15 @@ h1 {
 }
 
 .stock-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
   align-items: stretch;
   margin-top: 14px;
 }
 
 .stock-stat {
-  flex: 1;
+  min-width: 0;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
@@ -303,6 +315,14 @@ h1 {
   display: block;
   margin-top: 4px;
   font-size: 16px;
+}
+
+.amount-fit {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .profit {
@@ -357,7 +377,7 @@ h1 {
   border: 0;
 }
 
-.is-capturing .actions {
+.is-capturing .topbar {
   display: none;
 }
 
@@ -431,10 +451,6 @@ h1 {
 @media (min-width: 720px) {
   .shell {
     padding-top: 28px;
-  }
-
-  h1 {
-    font-size: 34px;
   }
 
   .hero-value {

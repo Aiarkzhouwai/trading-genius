@@ -16,13 +16,15 @@ const defaultHoldings = [
     code: "688146",
     market: "SH",
     shares: 300,
-    costPrice: 390
+    costPrice: 390,
+    entryDate: "2026-06-26"
   },
   {
     code: "688530",
     market: "SH",
     shares: 200,
-    costPrice: 85
+    costPrice: 85,
+    entryDate: "2026-06-26"
   }
 ];
 
@@ -41,11 +43,23 @@ function parseHoldings(value) {
       code: String(item.code).trim(),
       market: String(item.market || inferMarket(item.code)).trim().toUpperCase(),
       shares: Number(item.shares),
-      costPrice: Number(item.costPrice)
+      costPrice: Number(item.costPrice),
+      entryDate: normalizeEntryDate(item.entryDate || item.tradeDate || item.buyDate),
+      dayBaseline: normalizeDayBaseline(item.dayBaseline)
     })).filter((item) => item.code && item.shares > 0 && item.costPrice > 0);
   } catch {
     return null;
   }
+}
+
+function normalizeEntryDate(value) {
+  const text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function normalizeDayBaseline(value) {
+  if (value === "cost" || value === "previousClose") return value;
+  return "auto";
 }
 
 function loadHoldings() {
@@ -241,12 +255,38 @@ async function fetchQuote(holding) {
   }
 }
 
+function chinaDateFrom(value) {
+  const date = value ? new Date(value) : new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function resolveDayBaseline(holding, quote) {
+  if (holding.dayBaseline === "cost" || holding.dayBaseline === "previousClose") {
+    return holding.dayBaseline;
+  }
+
+  const quoteChinaDate = chinaDateFrom(quote.quoteTime);
+  return holding.entryDate && holding.entryDate === quoteChinaDate
+    ? "cost"
+    : "previousClose";
+}
+
 function enrichHolding(holding, quote) {
   const costAmount = holding.shares * holding.costPrice;
   const marketValue = holding.shares * quote.lastPrice;
   const profit = marketValue - costAmount;
   const profitRate = costAmount ? (profit / costAmount) * 100 : 0;
-  const dayProfit = quote.change === null ? null : quote.change * holding.shares;
+  const dayBaseline = resolveDayBaseline(holding, quote);
+  const dayBaselinePrice = dayBaseline === "cost" ? holding.costPrice : quote.previousClose;
+  const dayChange = dayBaselinePrice === null ? null : quote.lastPrice - dayBaselinePrice;
+  const dayProfit = dayChange === null ? null : dayChange * holding.shares;
 
   return {
     ...holding,
@@ -266,6 +306,9 @@ function enrichHolding(holding, quote) {
     marketValue,
     profit,
     profitRate,
+    dayBaseline,
+    dayBaselinePrice,
+    dayChange,
     dayProfit
   };
 }
@@ -319,7 +362,7 @@ async function buildPortfolio() {
 
   const sources = [...new Set(items.map((item) => item.source).filter(Boolean))];
   const payload = {
-    title: "交易天才",
+    title: "持仓收益",
     currency: "CNY",
     refreshSeconds,
     source: sources.length ? `${sources.join(" / ")}公开行情接口` : "公开行情接口",

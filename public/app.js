@@ -32,14 +32,55 @@ const el = {
 };
 
 function formatCny(value, options = {}) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
-  const digits = options.compact ? 0 : 2;
+  const numeric = Number(value);
+  if (value === null || value === undefined || Number.isNaN(numeric)) return "--";
+  const compactFrom = options.compactFrom ?? 100_000;
+  const shouldCompact = options.compact === true
+    || (options.compact !== false && Math.abs(numeric) >= compactFrom);
+  if (shouldCompact) {
+    const sign = numeric < 0 ? "-" : "";
+    return `${sign}¥${formatChineseAmount(Math.abs(numeric))}`;
+  }
+
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: "CNY",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  }).format(value);
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(numeric);
+}
+
+function formatChineseAmount(value) {
+  const units = [
+    { value: 100_000_000, label: "亿" },
+    { value: 10_000, label: "万" }
+  ];
+  const unit = units.find((item) => value >= item.value);
+  if (!unit) {
+    return new Intl.NumberFormat("zh-CN", {
+      maximumFractionDigits: 2
+    }).format(value);
+  }
+
+  const scaled = value / unit.value;
+  const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+  return `${scaled.toFixed(decimals).replace(/\.0+$|(\.\d*[1-9])0+$/, "$1")}${unit.label}`;
+}
+
+function exactCny(value) {
+  return formatCny(value, { compact: false });
+}
+
+function formatShares(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "--";
+  if (Math.abs(numeric) >= 10_000) {
+    const sign = numeric < 0 ? "-" : "";
+    return `${sign}${formatChineseAmount(Math.abs(numeric))}`;
+  }
+  return new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: 0
+  }).format(numeric);
 }
 
 function formatPercent(value) {
@@ -53,10 +94,20 @@ function formatPrice(value) {
   return Number(value).toFixed(2);
 }
 
-function signedCny(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${formatCny(value)}`;
+function signedCny(value, options = {}) {
+  const numeric = Number(value);
+  if (value === null || value === undefined || Number.isNaN(numeric)) return "--";
+  const sign = numeric > 0 ? "+" : "";
+  return `${sign}${formatCny(numeric, options)}`;
+}
+
+function exactSignedCny(value) {
+  return signedCny(value, { compact: false });
+}
+
+function setAmountText(node, text, exactText = text) {
+  node.textContent = text;
+  node.title = exactText;
 }
 
 function escapeHtml(value) {
@@ -101,6 +152,31 @@ function parseShares(value) {
   return shares;
 }
 
+function finiteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function dayChangeFor(item) {
+  const serverDayChange = finiteNumber(item.dayChange);
+  if (serverDayChange !== null) return serverDayChange;
+
+  const lastPrice = finiteNumber(item.lastPrice);
+  const costPrice = finiteNumber(item.costPrice);
+  if (item.dayBaseline === "cost" && lastPrice !== null && costPrice !== null) {
+    return lastPrice - costPrice;
+  }
+
+  const quoteChange = finiteNumber(item.change);
+  if (quoteChange !== null) return quoteChange;
+
+  if (lastPrice !== null && costPrice !== null) {
+    return lastPrice - costPrice;
+  }
+
+  return null;
+}
+
 function summarize(items) {
   const costAmount = items.reduce((sum, item) => sum + item.costAmount, 0);
   const marketValue = items.reduce((sum, item) => sum + item.marketValue, 0);
@@ -126,7 +202,8 @@ function computeHolding(item) {
   const marketValue = shares * item.lastPrice;
   const profit = marketValue - costAmount;
   const profitRate = costAmount ? (profit / costAmount) * 100 : 0;
-  const dayProfit = item.change === null ? null : item.change * shares;
+  const dayChange = dayChangeFor(item);
+  const dayProfit = dayChange === null ? null : dayChange * shares;
 
   return {
     ...item,
@@ -137,6 +214,7 @@ function computeHolding(item) {
     marketValue,
     profit,
     profitRate,
+    dayChange,
     dayProfit
   };
 }
@@ -161,7 +239,7 @@ function renderBars(holdings, total) {
     segment.style.width = safeTotal
       ? `${Math.max(2, (item.marketValue / safeTotal) * 100)}%`
       : `${100 / Math.max(1, holdings.length)}%`;
-    segment.title = `${item.name} ${formatCny(item.marketValue)}`;
+    segment.title = `${item.name} ${exactCny(item.marketValue)}`;
     el.allocationBars.append(segment);
   });
 }
@@ -170,13 +248,14 @@ function renderSummary(data) {
   const summary = data.summary;
   const profitClass = toneClass(summary.profit);
 
-  el.totalProfit.textContent = signedCny(summary.profit);
+  setAmountText(el.totalProfit, signedCny(summary.profit), exactSignedCny(summary.profit));
   el.totalProfit.classList.toggle("loss", summary.profit < 0);
   el.totalRate.textContent = `收益率 ${formatPercent(summary.profitRate)}`;
-  el.dayProfit.textContent = `今日 ${signedCny(summary.dayProfit)}`;
+  el.totalRate.title = `收益率 ${formatPercent(summary.profitRate)}`;
+  setAmountText(el.dayProfit, `今日 ${signedCny(summary.dayProfit)}`, `今日 ${exactSignedCny(summary.dayProfit)}`);
   el.dayProfit.className = toneClass(summary.dayProfit);
-  el.marketValue.textContent = formatCny(summary.marketValue);
-  el.costAmount.textContent = formatCny(summary.costAmount);
+  setAmountText(el.marketValue, formatCny(summary.marketValue), exactCny(summary.marketValue));
+  setAmountText(el.costAmount, formatCny(summary.costAmount), exactCny(summary.costAmount));
   el.visualRatio.textContent = `${data.holdings.length} 只持仓`;
   el.totalRate.className = profitClass;
 
@@ -196,10 +275,11 @@ function renderStatus(data) {
   el.sourceText.textContent = `${data.source} · 行情 ${formatChinaTime(latestQuoteTime)} · 页面 ${formatChinaTime(data.computedAt)}`;
 }
 
-function showSnapshotSaved() {
+function showSnapshotSaved(message = "截图已生成", detail = "如未自动进入相册，请在手机保存或分享面板里选择保存图片。") {
   window.clearTimeout(state.statusRestoreTimer);
   window.setTimeout(() => {
-    el.statusText.textContent = "截图已生成";
+    el.statusText.textContent = message;
+    el.sourceText.textContent = detail;
   }, 0);
   state.statusRestoreTimer = window.setTimeout(() => {
     const data = computedPortfolio();
@@ -225,7 +305,7 @@ function renderHoldings(holdings) {
           <span>${escapeHtml(displayCode)} · 成本 ${formatPrice(item.costPrice)}</span>
         </div>
         <div class="price-box">
-          <strong>${formatPrice(item.lastPrice)}</strong>
+          <strong class="amount-fit">${formatPrice(item.lastPrice)}</strong>
           <span class="chip ${changeClass}">${formatPercent(item.changePercent)}</span>
         </div>
       </div>
@@ -244,15 +324,15 @@ function renderHoldings(holdings) {
       <div class="stock-grid">
         <div class="stock-stat">
           <span class="stock-label">累计收益</span>
-          <strong class="${profitClass}" data-field="profit">${signedCny(item.profit)}</strong>
+          <strong class="${profitClass} amount-fit" data-field="profit" title="${escapeHtml(exactSignedCny(item.profit))}">${signedCny(item.profit)}</strong>
         </div>
         <div class="stock-stat">
           <span class="stock-label">收益率</span>
-          <strong class="${profitClass}" data-field="profitRate">${formatPercent(item.profitRate)}</strong>
+          <strong class="${profitClass} amount-fit" data-field="profitRate" title="${escapeHtml(formatPercent(item.profitRate))}">${formatPercent(item.profitRate)}</strong>
         </div>
         <div class="stock-stat">
           <span class="stock-label">市值</span>
-          <strong data-field="marketValue">${formatCny(item.marketValue)}</strong>
+          <strong class="amount-fit" data-field="marketValue" title="${escapeHtml(exactCny(item.marketValue))}">${formatCny(item.marketValue)}</strong>
         </div>
       </div>
     `;
@@ -271,9 +351,9 @@ function updateHoldingStats(holdings) {
     const profitRate = card.querySelector('[data-field="profitRate"]');
     const marketValue = card.querySelector('[data-field="marketValue"]');
 
-    profit.textContent = signedCny(item.profit);
-    profitRate.textContent = formatPercent(item.profitRate);
-    marketValue.textContent = formatCny(item.marketValue);
+    setAmountText(profit, signedCny(item.profit), exactSignedCny(item.profit));
+    setAmountText(profitRate, formatPercent(item.profitRate), formatPercent(item.profitRate));
+    setAmountText(marketValue, formatCny(item.marketValue), exactCny(item.marketValue));
     setTone(profit, item.profit);
     setTone(profitRate, item.profitRate);
   });
@@ -378,32 +458,77 @@ function startConfetti() {
   state.confettiFrame = requestAnimationFrame(draw);
 }
 
-function downloadCanvas(canvas) {
+function snapshotFileName() {
+  const date = new Date().toISOString().slice(0, 10);
+  return `holdings-${date}.png`;
+}
+
+function canvasToBlob(canvas) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (!blob) {
         reject(new Error("截图生成失败"));
         return;
       }
-
-      const date = new Date().toISOString().slice(0, 10);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `trading-genius-${date}.png`;
-
-      if ("download" in HTMLAnchorElement.prototype) {
-        document.body.append(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } else {
-        window.open(url, "_blank", "noopener");
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      }
-      resolve();
+      resolve(blob);
     }, "image/png", 1);
   });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+
+  if ("download" in HTMLAnchorElement.prototype) {
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
+
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function saveCanvasToDevice(canvas) {
+  const blob = await canvasToBlob(canvas);
+  const filename = snapshotFileName();
+  const file = typeof File === "function"
+    ? new File([blob], filename, { type: "image/png" })
+    : null;
+  const canShareFile = file
+    && typeof navigator.canShare === "function"
+    && navigator.canShare({ files: [file] })
+    && typeof navigator.share === "function";
+
+  if (canShareFile) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: "持仓收益截图"
+      });
+      return {
+        message: "已打开系统保存/分享面板",
+        detail: "在手机面板里选择保存图片或存储到照片。"
+      };
+    } catch (error) {
+      if (error.name === "AbortError") {
+        return {
+          message: "已取消保存",
+          detail: "需要时可以再点保存截图。"
+        };
+      }
+    }
+  }
+
+  downloadBlob(blob, filename);
+  return {
+    message: "截图已生成",
+    detail: "如未自动进入相册，请在下载记录或打开的图片里保存到相册。"
+  };
 }
 
 async function captureDomSnapshot() {
@@ -447,18 +572,30 @@ function drawCard(ctx, x, y, width, height) {
   ctx.restore();
 }
 
-function drawText(ctx, text, x, y, font, color, align = "left") {
+function clipCanvasText(ctx, text, maxWidth) {
+  if (!maxWidth) return String(text);
+  const raw = String(text);
+  if (ctx.measureText(raw).width <= maxWidth) return raw;
+
+  let clipped = raw;
+  while (clipped.length > 1 && ctx.measureText(`${clipped}...`).width > maxWidth) {
+    clipped = clipped.slice(0, -1);
+  }
+  return `${clipped}...`;
+}
+
+function drawText(ctx, text, x, y, font, color, align = "left", maxWidth = null) {
   ctx.font = font;
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "top";
-  ctx.fillText(text, x, y);
+  ctx.fillText(clipCanvasText(ctx, text, maxWidth), x, y);
 }
 
 function captureCanvasFallback() {
   const data = computedPortfolio();
   const width = 1080;
-  const height = 520 + data.holdings.length * 260;
+  const height = 500 + data.holdings.length * 250;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -466,34 +603,33 @@ function captureCanvasFallback() {
 
   ctx.fillStyle = "#f8f9fb";
   ctx.fillRect(0, 0, width, height);
-  drawText(ctx, "交易天才", 54, 52, "800 78px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a");
 
-  drawCard(ctx, 54, 160, 972, 220);
-  drawText(ctx, "累计收益", 94, 202, "500 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-  drawText(ctx, signedCny(data.summary.profit), 94, 250, "850 82px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", data.summary.profit < 0 ? "#16875a" : "#d62027");
-  drawText(ctx, `收益率 ${formatPercent(data.summary.profitRate)}`, 94, 334, "700 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", data.summary.profit < 0 ? "#16875a" : "#d62027");
-  drawText(ctx, `今日 ${signedCny(data.summary.dayProfit)}`, 986, 334, "700 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", data.summary.dayProfit < 0 ? "#16875a" : "#d62027", "right");
+  drawCard(ctx, 54, 54, 972, 220);
+  drawText(ctx, "累计收益", 94, 96, "500 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+  drawText(ctx, signedCny(data.summary.profit), 94, 144, "850 82px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", data.summary.profit < 0 ? "#16875a" : "#d62027", "left", 620);
+  drawText(ctx, `收益率 ${formatPercent(data.summary.profitRate)}`, 94, 228, "700 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", data.summary.profit < 0 ? "#16875a" : "#d62027", "left", 420);
+  drawText(ctx, `今日 ${signedCny(data.summary.dayProfit)}`, 986, 228, "700 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", data.summary.dayProfit < 0 ? "#16875a" : "#d62027", "right", 430);
 
-  drawCard(ctx, 54, 410, 466, 120);
-  drawText(ctx, "当前市值", 94, 442, "500 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-  drawText(ctx, formatCny(data.summary.marketValue), 94, 482, "800 34px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a");
-  drawCard(ctx, 560, 410, 466, 120);
-  drawText(ctx, "投入成本", 600, 442, "500 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-  drawText(ctx, formatCny(data.summary.costAmount), 600, 482, "800 34px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a");
+  drawCard(ctx, 54, 304, 466, 120);
+  drawText(ctx, "当前市值", 94, 336, "500 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+  drawText(ctx, formatCny(data.summary.marketValue), 94, 376, "800 34px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 370);
+  drawCard(ctx, 560, 304, 466, 120);
+  drawText(ctx, "投入成本", 600, 336, "500 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
+  drawText(ctx, formatCny(data.summary.costAmount), 600, 376, "800 34px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 370);
 
-  let y = 570;
+  let y = 464;
   data.holdings.forEach((item) => {
     drawCard(ctx, 54, y, 972, 210);
-    drawText(ctx, item.name, 94, y + 34, "800 42px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a");
-    drawText(ctx, `${item.displayCode || item.windCode || item.code} · ${item.shares} 股 · 成本 ${formatPrice(item.costPrice)}`, 94, y + 88, "500 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, formatPrice(item.lastPrice), 986, y + 34, "850 46px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "right");
-    drawText(ctx, formatPercent(item.changePercent), 986, y + 92, "800 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.changePercent < 0 ? "#16875a" : "#d62027", "right");
+    drawText(ctx, item.name, 94, y + 34, "800 42px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 560);
+    drawText(ctx, `${item.displayCode || item.windCode || item.code} · ${formatShares(item.shares)} 股 · 成本 ${formatPrice(item.costPrice)}`, 94, y + 88, "500 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a", "left", 620);
+    drawText(ctx, formatPrice(item.lastPrice), 986, y + 34, "850 46px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "right", 260);
+    drawText(ctx, formatPercent(item.changePercent), 986, y + 92, "800 26px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.changePercent < 0 ? "#16875a" : "#d62027", "right", 220);
     drawText(ctx, "累计收益", 94, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, signedCny(item.profit), 94, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profit < 0 ? "#16875a" : "#d62027");
+    drawText(ctx, signedCny(item.profit), 94, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profit < 0 ? "#16875a" : "#d62027", "left", 240);
     drawText(ctx, "收益率", 394, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, formatPercent(item.profitRate), 394, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profitRate < 0 ? "#16875a" : "#d62027");
+    drawText(ctx, formatPercent(item.profitRate), 394, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", item.profitRate < 0 ? "#16875a" : "#d62027", "left", 210);
     drawText(ctx, "市值", 694, y + 146, "500 24px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#69707a");
-    drawText(ctx, formatCny(item.marketValue), 694, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a");
+    drawText(ctx, formatCny(item.marketValue), 694, y + 176, "800 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif", "#15171a", "left", 270);
     y += 250;
   });
 
@@ -512,8 +648,8 @@ async function saveSnapshot() {
     } catch {
       canvas = captureCanvasFallback();
     }
-    await downloadCanvas(canvas);
-    showSnapshotSaved();
+    const result = await saveCanvasToDevice(canvas);
+    showSnapshotSaved(result.message, result.detail);
   } finally {
     document.body.classList.remove("is-capturing");
     el.saveButton.disabled = false;

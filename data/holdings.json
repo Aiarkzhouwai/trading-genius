@@ -4,13 +4,15 @@
       "code": "688146",
       "market": "SH",
       "shares": 300,
-      "costPrice": 390
+      "costPrice": 390,
+      "entryDate": "2026-06-26"
     },
     {
       "code": "688530",
       "market": "SH",
       "shares": 200,
-      "costPrice": 85
+      "costPrice": 85,
+      "entryDate": "2026-06-26"
     }
   ]
 }
