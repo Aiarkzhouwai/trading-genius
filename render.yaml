@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: trading-genius
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: REFRESH_SECONDS
+        value: "30"
+      - key: QUOTE_CACHE_MS
+        value: "15000"
