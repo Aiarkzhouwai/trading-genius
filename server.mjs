@@ -291,9 +291,62 @@ async function fetchTencentDailyKline(holding) {
   };
 }
 
+async function fetchTencentIntradayMinutes(holding) {
+  const symbol = tencentSymbolFor(holding);
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=${symbol}`;
+  const response = await fetchWithRetry(url, {
+    attempts: 1,
+    timeoutMs: 5000,
+    headers: {
+      "accept": "application/json,text/plain,*/*",
+      "user-agent": "trading-genius/0.1"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Tencent minute request failed with ${response.status}`);
+  }
+
+  const body = await response.json();
+  const rows = body.data?.[symbol]?.data?.data || [];
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error("Tencent minute response did not include minute data");
+  }
+
+  const items = rows.map((row) => {
+    const parts = String(row).trim().split(/\s+/);
+    return {
+      time: parts[0],
+      price: numberOrNull(parts[1]),
+      volume: numberOrNull(parts[2]),
+      amount: numberOrNull(parts[3])
+    };
+  }).filter((item) => item.time && item.price !== null);
+
+  if (!items.length) {
+    throw new Error("Tencent minute response did not include valid minute data");
+  }
+
+  return {
+    source: "腾讯分时",
+    items
+  };
+}
+
 async function fetchDailyKline(holding) {
   try {
     return await fetchTencentDailyKline(holding);
+  } catch (error) {
+    return {
+      source: null,
+      items: [],
+      error: error.message
+    };
+  }
+}
+
+async function fetchIntradayMinutes(holding) {
+  try {
+    return await fetchTencentIntradayMinutes(holding);
   } catch (error) {
     return {
       source: null,
@@ -338,7 +391,7 @@ function resolveDayBaseline(holding, quote) {
     : "previousClose";
 }
 
-function enrichHolding(holding, quote, dailyKline = { items: [] }) {
+function enrichHolding(holding, quote, dailyKline = { items: [] }, intradayMinutes = { items: [] }) {
   const costAmount = holding.shares * holding.costPrice;
   const marketValue = holding.shares * quote.lastPrice;
   const profit = marketValue - costAmount;
@@ -372,7 +425,10 @@ function enrichHolding(holding, quote, dailyKline = { items: [] }) {
     dayProfit,
     dailyKline: dailyKline.items,
     klineSource: dailyKline.source,
-    klineError: dailyKline.error
+    klineError: dailyKline.error,
+    intradayMinutes: intradayMinutes.items,
+    intradaySource: intradayMinutes.source,
+    intradayError: intradayMinutes.error
   };
 }
 
@@ -406,11 +462,12 @@ async function buildPortfolio() {
       ...holding,
       market: holding.market || inferMarket(holding.code)
     };
-    const [quote, dailyKline] = await Promise.all([
+    const [quote, dailyKline, intradayMinutes] = await Promise.all([
       fetchQuote(normalized),
-      fetchDailyKline(normalized)
+      fetchDailyKline(normalized),
+      fetchIntradayMinutes(normalized)
     ]);
-    return enrichHolding(normalized, quote, dailyKline);
+    return enrichHolding(normalized, quote, dailyKline, intradayMinutes);
   }));
 
   const items = [];
